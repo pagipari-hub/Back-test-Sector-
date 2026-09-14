@@ -1,4 +1,4 @@
-from __future__
+from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -47,14 +47,16 @@ def download_series(name: str, ticker: str) -> None:
         start = (last_date - pd.Timedelta(days=OVERLAP_DAYS)).date().isoformat()
         print(f"Refreshing {name} [{ticker}] from {start} (last stored: {last_date.date()})...")
 
-    new = normalize(yf.download(
-        ticker,
-        start=start,
-        auto_adjust=False,
-        progress=False,
-        actions=False,
-        threads=False,
-    ))
+    new = normalize(
+        yf.download(
+            ticker,
+            start=start,
+            auto_adjust=False,
+            progress=False,
+            actions=False,
+            threads=False,
+        )
+    )
 
     if new.empty:
         if existing.empty:
