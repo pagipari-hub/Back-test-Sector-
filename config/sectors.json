@@ -1,0 +1,18 @@
+{
+  "benchmark": {
+    "name": "NIFTY 50",
+    "ticker": "^NSEI"
+  },
+  "sectors": {
+    "NIFTY AUTO": "^CNXAUTO",
+    "NIFTY BANK": "^NSEBANK",
+    "NIFTY IT": "^CNXIT",
+    "NIFTY PHARMA": "^CNXPHARMA",
+    "NIFTY FMCG": "^CNXFMCG",
+    "NIFTY METAL": "^CNXMETAL",
+    "NIFTY REALTY": "^CNXREALTY",
+    "NIFTY PSU BANK": "^CNXPSUBANK",
+    "NIFTY MEDIA": "^CNXMEDIA",
+    "NIFTY ENERGY": "^CNXENERGY"
+  }
+}
