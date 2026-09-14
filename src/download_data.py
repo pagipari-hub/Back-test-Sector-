@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__
 
 import json
 from pathlib import Path
@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config" / "sectors.json"
 DATA_DIR = ROOT / "data" / "daily"
 DEFAULT_START = "2005-01-01"
+OVERLAP_DAYS = 90
 
 
 def load_config() -> dict:
@@ -20,9 +21,7 @@ def read_existing(output: Path) -> pd.DataFrame:
     if not output.exists():
         return pd.DataFrame()
     df = pd.read_csv(output, parse_dates=["Date"])
-    df = df.sort_values("Date").drop_duplicates("Date")
-    df = df.set_index("Date")
-    return df
+    return df.sort_values("Date").drop_duplicates("Date").set_index("Date")
 
 
 def normalize(df: pd.DataFrame) -> pd.DataFrame:
@@ -45,8 +44,8 @@ def download_series(name: str, ticker: str) -> None:
         print(f"Downloading {name} [{ticker}] from {start}...")
     else:
         last_date = existing.index.max()
-        start = (last_date + pd.Timedelta(days=1)).date().isoformat()
-        print(f"Updating {name} [{ticker}] from {start} (last stored: {last_date.date()})...")
+        start = (last_date - pd.Timedelta(days=OVERLAP_DAYS)).date().isoformat()
+        print(f"Refreshing {name} [{ticker}] from {start} (last stored: {last_date.date()})...")
 
     new = normalize(yf.download(
         ticker,
@@ -54,25 +53,22 @@ def download_series(name: str, ticker: str) -> None:
         auto_adjust=False,
         progress=False,
         actions=False,
+        threads=False,
     ))
 
     if new.empty:
         if existing.empty:
-            print(f"  WARNING: no data returned for {ticker}")
+            print(f"WARNING: no data returned for {ticker}")
         else:
-            print("  Up to date: no new rows.")
+            print("No rows returned; existing data retained.")
         return
 
-    if existing.empty:
-        combined = new
-    else:
-        combined = pd.concat([existing, new])
-        combined = combined[~combined.index.duplicated(keep="last")].sort_index()
-
+    combined = new if existing.empty else pd.concat([existing, new])
+    combined = combined[~combined.index.duplicated(keep="last")].sort_index()
     combined.index.name = "Date"
     combined.to_csv(output)
-    added = len(combined) - len(existing)
-    print(f"  Stored {len(combined):,} rows (+{max(added, 0):,} new) -> {output}")
+    added = max(len(combined) - len(existing), 0)
+    print(f"Stored {len(combined):,} rows (+{added:,} new) -> {output}")
 
 
 def main() -> None:
