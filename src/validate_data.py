@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+from pathlib import Path
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+DAILY_DIR = ROOT / "data" / "daily"
+WEEKLY_DIR = ROOT / "data" / "weekly"
+REPORT_DIR = ROOT / "data" / "validation"
+
+REQUIRED_OHLC = ["Open", "High", "Low", "Close"]
+
+
+def validate_file(path: Path, frequency: str) -> dict:
+    result = {
+        "file": path.name,
+        "frequency": frequency,
+        "status": "PASS",
+        "rows": 0,
+        "first_date": "",
+        "last_date": "",
+        "duplicate_dates": 0,
+        "missing_close": 0,
+        "invalid_ohlc": 0,
+        "negative_values": 0,
+        "return_mismatch": 0,
+        "notes": "",
+    }
+
+    try:
+        df = pd.read_csv(path, parse_dates=["Date"])
+        result["rows"] = len(df)
+
+        if df.empty:
+            result["status"] = "FAIL"
+            result["notes"] = "Empty file"
+            return result
+
+        if df["Date"].isna().any():
+            result["status"] = "FAIL"
+            result["notes"] = "Invalid/missing dates"
+            return result
+
+        df = df.sort_values("Date")
+        result["first_date"] = df["Date"].min().date().isoformat()
+        result["last_date"] = df["Date"].max().date().isoformat()
+
+        result["duplicate_dates"] = int(df["Date"].duplicated().sum())
+
+        missing_cols = [c for c in REQUIRED_OHLC if c not in df.columns]
+        if missing_cols:
+            result["status"] = "FAIL"
+            result["notes"] = f"Missing columns: {', '.join(missing_cols)}"
+            return result
+
+        for col in REQUIRED_OHLC:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        result["missing_close"] = int(df["Close"].isna().sum())
+        result["invalid_ohlc"] = int(
+            ((df["High"] < df["Low"]) |
+             (df["High"] < df["Open"]) |
+             (df["High"] < df["Close"]) |
+             (df["Low"] > df["Open"]) |
+             (df["Low"] > df["Close"])).fillna(False).sum()
+        )
+        result["negative_values"] = int((df[REQUIRED_OHLC] <= 0).any(axis=1).sum())
+
+        if frequency == "weekly":
+            for period, col in [(1, "Return_1W"), (4, "Return_4W"), (12, "Return_12W"), (26, "Return_26W"), (52, "Return_52W")]:
+                if col in df.columns:
+                    expected = df["Close"].pct_change(period)
+                    actual = pd.to_numeric(df[col], errors="coerce")
+                    mismatch = (actual - expected).abs() > 1e-10
+                    mismatch &= actual.notna() & expected.notna()
+                    result["return_mismatch"] += int(mismatch.sum())
+
+        failures = [
+            result["duplicate_dates"],
+            result["missing_close"],
+            result["invalid_ohlc"],
+            result["negative_values"],
+            result["return_mismatch"],
+        ]
+        if any(failures):
+            result["status"] = "FAIL"
+            result["notes"] = "One or more validation checks failed"
+        else:
+            result["notes"] = "All checks passed"
+
+    except Exception as exc:
+        result["status"] = "FAIL"
+        result["notes"] = f"Validation error: {exc}"
+
+    return result
+
+
+def main() -> None:
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    results = []
+
+    for frequency, directory in [("daily", DAILY_DIR), ("weekly", WEEKLY_DIR)]:
+        for path in sorted(directory.glob("*.csv")):
+            results.append(validate_file(path, frequency))
+
+    report = pd.DataFrame(results)
+    report_path = REPORT_DIR / "data_quality_report.csv"
+    report.to_csv(report_path, index=False)
+
+    failures = report[report["status"] != "PASS"]
+    print("=" * 72)
+    print("DATA VALIDATION SUMMARY")
+    print("=" * 72)
+    print(f"Files checked : {len(report)}")
+    print(f"PASS          : {(report['status'] == 'PASS').sum()}")
+    print(f"FAIL          : {(report['status'] != 'PASS').sum()}")
+    print(f"Report        : {report_path}")
+    print("=" * 72)
+
+    if not failures.empty:
+        print("FAILED FILES:")
+        print(failures[["frequency", "file", "notes"]].to_string(index=False))
+        raise SystemExit(1)
+
+    print("ALL DATA VALIDATION CHECKS PASSED")
+
+
+if __name__ == "__main__":
+    main()
