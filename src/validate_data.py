@@ -9,6 +9,7 @@ WEEKLY_DIR = ROOT / "data" / "weekly"
 REPORT_DIR = ROOT / "data" / "validation"
 
 REQUIRED_OHLC = ["Open", "High", "Low", "Close"]
+MAX_ALLOWED_GAP_DAYS = 10
 
 
 def validate_file(path: Path, frequency: str) -> dict:
@@ -24,6 +25,8 @@ def validate_file(path: Path, frequency: str) -> dict:
         "invalid_ohlc": 0,
         "negative_values": 0,
         "return_mismatch": 0,
+        "max_gap_days": 0,
+        "gap_after": "",
         "notes": "",
     }
 
@@ -41,11 +44,20 @@ def validate_file(path: Path, frequency: str) -> dict:
             result["notes"] = "Invalid/missing dates"
             return result
 
-        df = df.sort_values("Date")
+        df = df.sort_values("Date").reset_index(drop=True)
         result["first_date"] = df["Date"].min().date().isoformat()
         result["last_date"] = df["Date"].max().date().isoformat()
 
         result["duplicate_dates"] = int(df["Date"].duplicated().sum())
+
+        if len(df) >= 2:
+            date_gaps = df["Date"].diff().dt.days
+            max_gap_position = date_gaps.idxmax()
+            max_gap = int(date_gaps.loc[max_gap_position])
+            result["max_gap_days"] = max_gap
+            result["gap_after"] = (
+                df.loc[max_gap_position - 1, "Date"].date().isoformat()
+            )
 
         missing_cols = [c for c in REQUIRED_OHLC if c not in df.columns]
         if missing_cols:
@@ -58,16 +70,26 @@ def validate_file(path: Path, frequency: str) -> dict:
 
         result["missing_close"] = int(df["Close"].isna().sum())
         result["invalid_ohlc"] = int(
-            ((df["High"] < df["Low"]) |
-             (df["High"] < df["Open"]) |
-             (df["High"] < df["Close"]) |
-             (df["Low"] > df["Open"]) |
-             (df["Low"] > df["Close"])).fillna(False).sum()
+            (
+                (df["High"] < df["Low"])
+                | (df["High"] < df["Open"])
+                | (df["High"] < df["Close"])
+                | (df["Low"] > df["Open"])
+                | (df["Low"] > df["Close"])
+            ).fillna(False).sum()
         )
-        result["negative_values"] = int((df[REQUIRED_OHLC] <= 0).any(axis=1).sum())
+        result["negative_values"] = int(
+            (df[REQUIRED_OHLC] <= 0).any(axis=1).sum()
+        )
 
         if frequency == "weekly":
-            for period, col in [(1, "Return_1W"), (4, "Return_4W"), (12, "Return_12W"), (26, "Return_26W"), (52, "Return_52W")]:
+            for period, col in [
+                (1, "Return_1W"),
+                (4, "Return_4W"),
+                (12, "Return_12W"),
+                (26, "Return_26W"),
+                (52, "Return_52W"),
+            ]:
                 if col in df.columns:
                     expected = df["Close"].pct_change(period)
                     actual = pd.to_numeric(df[col], errors="coerce")
@@ -77,10 +99,21 @@ def validate_file(path: Path, frequency: str) -> dict:
 
         failed_checks = [
             f"{k}={result[k]}"
-            for k in ("duplicate_dates", "missing_close", "invalid_ohlc",
-                      "negative_values", "return_mismatch")
+            for k in (
+                "duplicate_dates",
+                "missing_close",
+                "invalid_ohlc",
+                "negative_values",
+                "return_mismatch",
+            )
             if result[k]
         ]
+
+        if result["max_gap_days"] > MAX_ALLOWED_GAP_DAYS:
+            failed_checks.append(
+                f"data_gap={result['max_gap_days']}d after {result['gap_after']}"
+            )
+
         if failed_checks:
             result["status"] = "FAIL"
             result["notes"] = "Failed: " + ", ".join(failed_checks)
@@ -118,7 +151,11 @@ def main() -> None:
 
     if not failures.empty:
         print("FAILED FILES:")
-        print(failures[["frequency", "file", "notes"]].to_string(index=False))
+        print(
+            failures[
+                ["frequency", "file", "max_gap_days", "gap_after", "notes"]
+            ].to_string(index=False)
+        )
         raise SystemExit(1)
 
     print("ALL DATA VALIDATION CHECKS PASSED")
