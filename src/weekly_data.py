@@ -25,12 +25,14 @@ def to_weekly(path: Path) -> pd.DataFrame:
     if "Volume" in df:
         weekly["Volume"] = df["Volume"].resample("W-FRI").sum(min_count=1)
 
+    weekly = weekly.dropna(subset=["Close"])
+
     weekly["Return_1W"] = weekly["Close"].pct_change()
     weekly["Return_4W"] = weekly["Close"].pct_change(4)
     weekly["Return_12W"] = weekly["Close"].pct_change(12)
     weekly["Return_26W"] = weekly["Close"].pct_change(26)
     weekly["Return_52W"] = weekly["Close"].pct_change(52)
-    return weekly.dropna(subset=["Close"])
+    return weekly
 
 
 def main() -> None:
