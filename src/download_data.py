@@ -66,6 +66,7 @@ def download_series(name: str, ticker: str) -> None:
         return
 
     combined = new if existing.empty else pd.concat([existing, new])
+    combined = combined.dropna(subset=["Close"])
     combined = combined[~combined.index.duplicated(keep="last")].sort_index()
     combined.index.name = "Date"
     combined.to_csv(output)
