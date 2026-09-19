@@ -75,16 +75,15 @@ def validate_file(path: Path, frequency: str) -> dict:
                     mismatch &= actual.notna() & expected.notna()
                     result["return_mismatch"] += int(mismatch.sum())
 
-        failures = [
-            result["duplicate_dates"],
-            result["missing_close"],
-            result["invalid_ohlc"],
-            result["negative_values"],
-            result["return_mismatch"],
+        failed_checks = [
+            f"{k}={result[k]}"
+            for k in ("duplicate_dates", "missing_close", "invalid_ohlc",
+                      "negative_values", "return_mismatch")
+            if result[k]
         ]
-        if any(failures):
+        if failed_checks:
             result["status"] = "FAIL"
-            result["notes"] = "One or more validation checks failed"
+            result["notes"] = "Failed: " + ", ".join(failed_checks)
         else:
             result["notes"] = "All checks passed"
 
