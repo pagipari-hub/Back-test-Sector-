@@ -23,5 +23,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Check yfinance source coverage
+        run: python src/check_source.py
+
       - name: Run deterministic tests
         run: pytest -q
