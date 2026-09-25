@@ -9,10 +9,17 @@ WEEKLY_DIR = ROOT / "data" / "weekly"
 REPORT_DIR = ROOT / "data" / "validation"
 
 REQUIRED_OHLC = ["Open", "High", "Low", "Close"]
-MAX_ALLOWED_GAP_DAYS = 10
+MAX_DAILY_GAP_DAYS = 10
+MAX_WEEKLY_GAP_DAYS = 14
+MAX_DAILY_STALE_DAYS = 5
+MAX_WEEKLY_STALE_DAYS = 14
 
 
-def validate_file(path: Path, frequency: str) -> dict:
+def market_today() -> pd.Timestamp:
+    return pd.Timestamp.now(tz="Asia/Kolkata").tz_localize(None).normalize()
+
+
+def validate_file(path: Path, frequency: str, expected_latest: pd.Timestamp | None = None) -> dict:
     result = {
         "file": path.name,
         "frequency": frequency,
@@ -27,6 +34,7 @@ def validate_file(path: Path, frequency: str) -> dict:
         "return_mismatch": 0,
         "max_gap_days": 0,
         "gap_after": "",
+        "stale_days": 0,
         "notes": "",
     }
 
@@ -97,6 +105,12 @@ def validate_file(path: Path, frequency: str) -> dict:
                     mismatch &= actual.notna() & expected.notna()
                     result["return_mismatch"] += int(mismatch.sum())
 
+        reference = expected_latest if expected_latest is not None else market_today()
+        latest = pd.Timestamp(df["Date"].max()).normalize()
+        result["stale_days"] = max((reference - latest).days, 0)
+        gap_limit = MAX_WEEKLY_GAP_DAYS if frequency == "weekly" else MAX_DAILY_GAP_DAYS
+        stale_limit = MAX_WEEKLY_STALE_DAYS if frequency == "weekly" else MAX_DAILY_STALE_DAYS
+
         failed_checks = [
             f"{k}={result[k]}"
             for k in (
@@ -109,9 +123,14 @@ def validate_file(path: Path, frequency: str) -> dict:
             if result[k]
         ]
 
-        if result["max_gap_days"] > MAX_ALLOWED_GAP_DAYS:
+        if result["max_gap_days"] > gap_limit:
             failed_checks.append(
                 f"data_gap={result['max_gap_days']}d after {result['gap_after']}"
+            )
+
+        if result["stale_days"] > stale_limit:
+            failed_checks.append(
+                f"stale_data={result['stale_days']}d behind reference {reference.date()}"
             )
 
         if failed_checks:
@@ -130,10 +149,19 @@ def validate_file(path: Path, frequency: str) -> dict:
 def main() -> None:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     results = []
+    latest_dates = []
+    for path in sorted(DAILY_DIR.glob("*.csv")):
+        try:
+            dates = pd.to_datetime(pd.read_csv(path, usecols=["Date"])["Date"], errors="coerce")
+            if dates.notna().any():
+                latest_dates.append(dates.max().normalize())
+        except Exception:
+            pass
+    reference = max(latest_dates) if latest_dates else market_today()
 
     for frequency, directory in [("daily", DAILY_DIR), ("weekly", WEEKLY_DIR)]:
         for path in sorted(directory.glob("*.csv")):
-            results.append(validate_file(path, frequency))
+            results.append(validate_file(path, frequency, reference))
 
     report = pd.DataFrame(results)
     report_path = REPORT_DIR / "data_quality_report.csv"
@@ -143,6 +171,7 @@ def main() -> None:
     print("=" * 72)
     print("DATA VALIDATION SUMMARY")
     print("=" * 72)
+    print(f"Reference latest : {reference.date()}")
     print(f"Files checked : {len(report)}")
     print(f"PASS          : {(report['status'] == 'PASS').sum()}")
     print(f"FAIL          : {(report['status'] != 'PASS').sum()}")
@@ -153,7 +182,7 @@ def main() -> None:
         print("FAILED FILES:")
         print(
             failures[
-                ["frequency", "file", "max_gap_days", "gap_after", "notes"]
+                ["frequency", "file", "max_gap_days", "gap_after", "stale_days", "notes"]
             ].to_string(index=False)
         )
         raise SystemExit(1)
