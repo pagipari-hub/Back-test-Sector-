@@ -113,7 +113,7 @@ def nse_download(index_name: str, start: str) -> pd.DataFrame:
         chunk_end = min(cursor + pd.Timedelta(days=NSE_CHUNK_DAYS).to_pytimedelta(), end)
         print(f"  NSE fallback: {index_name} {cursor} -> {chunk_end}")
         chunks.append(nse_fetch_chunk(session, index_name, cursor, chunk_end))
-        cursor = chunk_end + pd.Timedelta(days=1)
+        cursor = chunk_end + pd.Timedelta(days=1).to_pytimedelta()
     if not chunks:
         return pd.DataFrame()
     return pd.concat(chunks).sort_index().loc[lambda x: ~x.index.duplicated(keep="last")]
@@ -142,7 +142,7 @@ def download_series(name: str, ticker: str) -> None:
     if existing.empty:
         start = DEFAULT_START
     else:
-        start = (existing.index.max() - pd.Timedelta(days=OVERLAP_DAYS)).date().isoformat()
+        start = (existing.index.max() - pd.Timedelta(days=int(OVERLAP_DAYS))).date().isoformat()
 
     print(f"Updating {name} [{ticker}] from {start}...")
     try:
@@ -159,7 +159,7 @@ def download_series(name: str, ticker: str) -> None:
         if not index_name:
             raise RuntimeError(f"No NSE fallback mapping configured for {name}")
         fallback_start = (
-            (combined.index.max() - pd.Timedelta(days=OVERLAP_DAYS)).date().isoformat()
+            (combined.index.max() - pd.Timedelta(days=int(OVERLAP_DAYS))).date().isoformat()
             if not combined.empty else DEFAULT_START
         )
         latest = combined.index.max().date().isoformat() if not combined.empty else "none"
